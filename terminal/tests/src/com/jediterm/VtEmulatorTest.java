@@ -75,6 +75,7 @@ public class VtEmulatorTest extends EmulatorTestAbstract {
    */
 
   public void testTest3_Characters_1() throws IOException {
+    System.setProperty("jediterm.enable.shift_out.character.support", Boolean.TRUE.toString());
     doVtTest();
   }
 

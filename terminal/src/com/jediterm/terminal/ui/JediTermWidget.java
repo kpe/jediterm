@@ -63,9 +63,12 @@ public class JediTermWidget extends JPanel implements TerminalSession, TerminalW
 
     StyleState styleState = createDefaultStyle();
 
-    myTextProcessing = new TextProcessing(settingsProvider.getHyperlinkColor(), settingsProvider.getHyperlinkHighlightingMode());
+    myTextProcessing = new TextProcessing(this,
+                                          settingsProvider.getHyperlinkColor(),
+                                          settingsProvider.getHyperlinkHighlightingMode());
 
     TerminalTextBuffer terminalTextBuffer = new TerminalTextBuffer(columns, lines, styleState, settingsProvider.getBufferMaxLinesCount(), myTextProcessing);
+    myTextProcessing.setTerminalTextBuffer(terminalTextBuffer);
 
     myTerminalPanel = createTerminalPanel(mySettingsProvider, styleState, terminalTextBuffer);
     myTerminal = new JediTerminal(myTerminalPanel, terminalTextBuffer, styleState);
@@ -226,6 +229,7 @@ public class JediTermWidget extends JPanel implements TerminalSession, TerminalW
 
   @Override
   public void close() {
+    stop();
     if (myTerminalStarter != null) {
       myTerminalStarter.close();
     }
@@ -355,11 +359,6 @@ public class JediTermWidget extends JPanel implements TerminalSession, TerminalW
         if (myTtyConnector.init(myPreConnectHandler)) {
           myTerminalPanel.addCustomKeyListener(myTerminalPanel.getTerminalKeyListener());
           myTerminalPanel.removeCustomKeyListener(myPreConnectHandler);
-          SwingUtilities.invokeLater(new Runnable() {
-            public void run() {
-              myTerminalPanel.requestFocusInWindow();
-            }
-          });
           myTerminalStarter.start();
         }
       } catch (Exception e) {
@@ -639,6 +638,10 @@ public class JediTermWidget extends JPanel implements TerminalSession, TerminalW
 
   public void addHyperlinkFilter(HyperlinkFilter filter) {
     myTextProcessing.addHyperlinkFilter(filter);
+  }
+
+  public void runFilters(@NotNull Runnable runnable) {
+    runnable.run();
   }
 
   @Override

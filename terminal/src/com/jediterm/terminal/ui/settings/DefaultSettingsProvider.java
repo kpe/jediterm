@@ -46,7 +46,7 @@ public class DefaultSettingsProvider implements SettingsProvider {
   @Override
   public KeyStroke[] getClearBufferKeyStrokes() {
     return new KeyStroke[]{UIUtil.isMac
-            ? KeyStroke.getKeyStroke(KeyEvent.VK_L, InputEvent.META_DOWN_MASK)
+            ? KeyStroke.getKeyStroke(KeyEvent.VK_K, InputEvent.META_DOWN_MASK)
             : KeyStroke.getKeyStroke(KeyEvent.VK_L, InputEvent.CTRL_DOWN_MASK)};
   }
 
@@ -82,7 +82,7 @@ public class DefaultSettingsProvider implements SettingsProvider {
     } else {
       fontName = "Monospaced";
     }
-    return Font.decode(fontName).deriveFont(getTerminalFontSize());
+    return new Font(fontName, Font.PLAIN, (int)getTerminalFontSize());
   }
 
   @Override

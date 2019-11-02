@@ -5,6 +5,7 @@ import com.jediterm.terminal.emulator.charset.CharacterSet;
 import com.jediterm.terminal.emulator.charset.GraphicSet;
 import com.jediterm.terminal.emulator.charset.GraphicSetState;
 import com.jediterm.terminal.emulator.mouse.*;
+import com.jediterm.terminal.model.hyperlinks.LinkInfo;
 import com.jediterm.terminal.ui.TerminalCoordinates;
 import com.jediterm.terminal.util.CharUtils;
 import org.apache.log4j.Logger;
@@ -17,6 +18,7 @@ import java.awt.event.InputEvent;
 import java.awt.event.MouseEvent;
 import java.awt.event.MouseWheelEvent;
 import java.io.UnsupportedEncodingException;
+import java.net.URI;
 import java.nio.charset.Charset;
 import java.util.*;
 
@@ -310,7 +312,8 @@ public class JediTerminal implements Terminal, TerminalMouseListener, TerminalCo
           break;
         case 2:
           beginY = 0;
-          endY = myTerminalHeight;
+          endY = myTerminalHeight - 1;
+          myTerminalTextBuffer.moveScreenLinesToHistory();
           break;
         default:
           LOG.error("Unsupported erase in display mode:" + arg);
@@ -685,7 +688,7 @@ public class JediTerminal implements Terminal, TerminalMouseListener, TerminalCo
   }
 
   private StoredCursor createCursorState() {
-    return new StoredCursor(myCursorX, myCursorY, myStyleState.getCurrent().clone(),
+    return new StoredCursor(myCursorX, myCursorY, myStyleState.getCurrent(),
             isAutoWrap(), isOriginMode(), myGraphicSetState);
   }
 
@@ -713,7 +716,7 @@ public class JediTerminal implements Terminal, TerminalMouseListener, TerminalCo
 
     adjustXY(-1);
 
-    myStyleState.setCurrent(storedCursor.getTextStyle().clone());
+    myStyleState.setCurrent(storedCursor.getTextStyle());
 
     setModeEnabled(TerminalMode.AutoWrap, storedCursor.isAutoWrap());
     setModeEnabled(TerminalMode.OriginMode, storedCursor.isOriginMode());
@@ -971,6 +974,28 @@ public class JediTerminal implements Terminal, TerminalMouseListener, TerminalCo
   }
 
   @Override
+  public void setLinkUriStarted(@NotNull String uri) {
+    TextStyle style = myStyleState.getCurrent();
+    myStyleState.setCurrent(new HyperlinkStyle(style, new LinkInfo(() -> {
+      try {
+        Desktop.getDesktop().browse(new URI(uri));
+      } catch (Exception ignored) {
+      }
+    })));
+  }
+
+  @Override
+  public void setLinkUriFinished() {
+    TextStyle current = myStyleState.getCurrent();
+    if (current instanceof HyperlinkStyle) {
+      TextStyle prevTextStyle = ((HyperlinkStyle) current).getPrevTextStyle();
+      if (prevTextStyle != null) {
+        myStyleState.setCurrent(prevTextStyle);
+      }
+    }
+  }
+
+  @Override
   public void setMouseFormat(MouseFormat mouseFormat) {
     myMouseFormat = mouseFormat;
   }
@@ -1018,7 +1043,12 @@ public class JediTerminal implements Terminal, TerminalMouseListener, TerminalCo
   }
 
   public interface ResizeHandler {
+    @Deprecated
     void sizeUpdated(int termWidth, int termHeight, int cursorY);
+
+    default void sizeUpdated(int termWidth, int termHeight, int cursorX, int cursorY) {
+      sizeUpdated(termWidth, termHeight, cursorY);
+    }
   }
 
   public Dimension resize(final Dimension pendingResize, final RequestOrigin origin) {
@@ -1026,13 +1056,17 @@ public class JediTerminal implements Terminal, TerminalMouseListener, TerminalCo
     if (pendingResize.width <= MIN_WIDTH) {
       pendingResize.setSize(MIN_WIDTH, pendingResize.height);
     }
-    final Dimension pixelSize = myDisplay.requestResize(pendingResize, origin, myCursorY, new ResizeHandler() {
+    final Dimension pixelSize = myDisplay.requestResize(pendingResize, origin, myCursorX, myCursorY, new ResizeHandler() {
       @Override
       public void sizeUpdated(int termWidth, int termHeight, int cursorY) {
+      }
+
+      @Override
+      public void sizeUpdated(int termWidth, int termHeight, int cursorX, int cursorY) {
         myTerminalWidth = termWidth;
         myTerminalHeight = termHeight;
         myCursorY = cursorY;
-        myCursorX = Math.min(myCursorX, myTerminalWidth - 1);
+        myCursorX = Math.min(cursorX, myTerminalWidth - 1);
         myDisplay.setCursor(myCursorX, myCursorY);
 
         myTabulator.resize(myTerminalWidth);
