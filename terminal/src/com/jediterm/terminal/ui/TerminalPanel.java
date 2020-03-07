@@ -22,9 +22,6 @@ import javax.swing.*;
 import javax.swing.event.ChangeEvent;
 import javax.swing.event.ChangeListener;
 import java.awt.*;
-import java.awt.datatransfer.Clipboard;
-import java.awt.datatransfer.ClipboardOwner;
-import java.awt.datatransfer.Transferable;
 import java.awt.event.*;
 import java.awt.font.TextHitInfo;
 import java.awt.im.InputMethodRequests;
@@ -470,13 +467,19 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
   }
 
   private void pageUp() {
-    int val = myBoundedRangeModel.getValue() - myTermSize.height;
-    myBoundedRangeModel.setValue(val >= myBoundedRangeModel.getMinimum() ? val : myBoundedRangeModel.getMinimum());
+    moveScrollBar(-myTermSize.height);
   }
 
   private void pageDown() {
-    int val = myBoundedRangeModel.getValue() + myTermSize.height;
-    myBoundedRangeModel.setValue(val <= myBoundedRangeModel.getMaximum() ? val : myBoundedRangeModel.getMaximum());
+    moveScrollBar(myTermSize.height);
+  }
+
+  private void scrollUp() {
+    moveScrollBar(-1);
+  }
+
+  private void scrollDown() {
+    moveScrollBar(1);
   }
 
   private void moveScrollBar(int k) {
@@ -1366,28 +1369,36 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
   @Override
   public List<TerminalAction> getActions() {
     return Lists.newArrayList(
-            new TerminalAction("Open as URL", new KeyStroke[0], input ->
-                    openSelectionAsURL()).withEnabledSupplier(this::selectionTextIsUrl),
-            new TerminalAction("Copy", mySettingsProvider.getCopyKeyStrokes(), input ->
-                    handleCopy()).withMnemonicKey(KeyEvent.VK_C).withEnabledSupplier(() -> mySelection != null),
-            new TerminalAction("Paste", mySettingsProvider.getPasteKeyStrokes(), input -> {
+            new TerminalAction(mySettingsProvider.getOpenUrlActionPresentation(), input -> {
+              return openSelectionAsURL();
+            }).withEnabledSupplier(this::selectionTextIsUrl),
+            new TerminalAction(mySettingsProvider.getCopyActionPresentation(), input -> {
+              return handleCopy();
+            }).withMnemonicKey(KeyEvent.VK_C).withEnabledSupplier(() -> mySelection != null),
+            new TerminalAction(mySettingsProvider.getPasteActionPresentation(), input -> {
               handlePaste();
               return true;
             }).withMnemonicKey(KeyEvent.VK_P).withEnabledSupplier(() -> getClipboardString() != null),
-            new TerminalAction("Clear Buffer", mySettingsProvider.getClearBufferKeyStrokes(), input -> {
+            new TerminalAction(mySettingsProvider.getClearBufferActionPresentation(), input -> {
               clearBuffer();
               return true;
             }).withMnemonicKey(KeyEvent.VK_K).withEnabledSupplier(() -> !myTerminalTextBuffer.isUsingAlternateBuffer()).separatorBefore(true),
-            new TerminalAction("Page Up", mySettingsProvider.getPageUpKeyStrokes(), input -> {
+            new TerminalAction(mySettingsProvider.getPageUpActionPresentation(), input -> {
               pageUp();
               return true;
             }).withEnabledSupplier(() -> !myTerminalTextBuffer.isUsingAlternateBuffer()).separatorBefore(true),
-            new TerminalAction("Page Down", mySettingsProvider.getPageDownKeyStrokes(), input -> {
+            new TerminalAction(mySettingsProvider.getPageDownActionPresentation(), input -> {
               pageDown();
               return true;
-            }).withEnabledSupplier(() -> !myTerminalTextBuffer.isUsingAlternateBuffer())
-
-    );
+            }).withEnabledSupplier(() -> !myTerminalTextBuffer.isUsingAlternateBuffer()),
+            new TerminalAction(mySettingsProvider.getLineUpActionPresentation(), input -> {
+              scrollUp();
+              return true;
+            }).withEnabledSupplier(() -> !myTerminalTextBuffer.isUsingAlternateBuffer()).separatorBefore(true),
+            new TerminalAction(mySettingsProvider.getLineDownActionPresentation(), input -> {
+              scrollDown();
+              return true;
+            }));
   }
 
   @NotNull

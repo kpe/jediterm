@@ -17,14 +17,20 @@ sourceSets {
 }
 
 dependencies {
-    compile 'log4j:log4j:1.2.14'
-    compile 'org.jetbrains:annotations:13.0'
-    compile 'com.google.guava:guava:25.1-jre'
+    compile 'log4j:log4j:1.2.17'
+    compile 'org.jetbrains:annotations:18.0.0'
+    compile 'com.google.guava:guava:27.1-jre'
 
     testCompile 'junit:junit:4.12'
 }
 
 compileJava {
+    sourceCompatibility = '1.8'
+    targetCompatibility = '1.8'
+    options.debugOptions.debugLevel = 'lines,vars,source'
+}
+
+compileTestJava {
     sourceCompatibility = '1.8'
     targetCompatibility = '1.8'
     options.debugOptions.debugLevel = 'lines,vars,source'
