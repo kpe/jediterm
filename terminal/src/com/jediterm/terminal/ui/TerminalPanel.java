@@ -48,6 +48,7 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
   private Font myBoldFont;
   private Font myBoldItalicFont;
   private int myDescent = 0;
+  private int mySpaceBetweenLines = 0;
   protected Dimension myCharSize = new Dimension();
   private boolean myMonospaced;
   protected Dimension myTermSize = new Dimension(80, 24);
@@ -207,7 +208,7 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
         if (Math.abs(e.getPreciseWheelRotation()) < 0.01) {
           notches = 0;
         }
-        moveScrollBar(notches);
+        moveScrollBar(notches * 3);
       }
     });
 
@@ -595,13 +596,7 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
                                  int cursorY,
                                  JediTerminal.ResizeHandler resizeHandler) {
     if (!newSize.equals(myTermSize)) {
-      myTerminalTextBuffer.lock();
-      try {
-        myTerminalTextBuffer.resize(newSize, origin, cursorX, cursorY, resizeHandler, mySelection);
-
-      } finally {
-        myTerminalTextBuffer.unlock();
-      }
+      myTerminalTextBuffer.resize(newSize, origin, cursorX, cursorY, resizeHandler, mySelection);
 
       myTermSize = (Dimension) newSize.clone();
 
@@ -626,15 +621,24 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
     final Graphics2D graphics = img.createGraphics();
     graphics.setFont(myNormalFont);
 
-    final float lineSpace = mySettingsProvider.getLineSpace();
+    final float lineSpacing = mySettingsProvider.getLineSpacing();
     final FontMetrics fo = graphics.getFontMetrics();
 
-    myDescent = fo.getDescent();
     myCharSize.width = fo.charWidth('W');
     // The magic +2 here is to give lines a tiny bit of extra height to avoid clipping when rendering some Apple
     // emoji, which are slightly higher than the font metrics reported character height :(
-    myCharSize.height = fo.getHeight() + (int) (lineSpace * 2) + 2;
-    myDescent += lineSpace;
+    int fontMetricsHeight = fo.getHeight();
+    myCharSize.height = (int)Math.ceil(fontMetricsHeight * lineSpacing);
+    mySpaceBetweenLines = Math.max(0, ((myCharSize.height - fontMetricsHeight) / 2) * 2);
+    myDescent = fo.getDescent();
+    if (LOG.isDebugEnabled()) {
+      // The magic +2 here is to give lines a tiny bit of extra height to avoid clipping when rendering some Apple
+      // emoji, which are slightly higher than the font metrics reported character height :(
+      int oldCharHeight = fontMetricsHeight + (int) (lineSpacing * 2) + 2;
+      int oldDescent = fo.getDescent() + (int)lineSpacing;
+      LOG.debug("charHeight=" + oldCharHeight + "->" + myCharSize.height +
+        ", descent=" + oldDescent + "->" + myDescent);
+    }
 
     myMonospaced = isMonospaced(fo);
     if (!myMonospaced) {
@@ -712,7 +716,7 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
         @Override
         public void consume(int x, int y, @NotNull TextStyle style, @NotNull CharBuffer characters, int startRow) {
           int row = y - startRow;
-          drawCharacters(x, row, style, characters, gfx);
+          drawCharacters(x, row, style, characters, gfx, false);
 
           if (myFindResult != null) {
             List<Pair<Integer, Integer>> ranges = myFindResult.getRanges(characters);
@@ -843,10 +847,7 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
   @Override
   public void processKeyEvent(final KeyEvent e) {
     handleKeyEvent(e);
-
     handleHyperlinks(e.getComponent(), e.isControlDown());
-
-    e.consume();
   }
 
   // also called from com.intellij.terminal.JBTerminalPanel
@@ -1113,15 +1114,20 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
   }
 
   private void drawCharacters(int x, int y, TextStyle style, CharBuffer buf, Graphics2D gfx) {
+    drawCharacters(x, y, style, buf, gfx, true);
+  }
+
+  private void drawCharacters(int x, int y, TextStyle style, CharBuffer buf, Graphics2D gfx,
+                              boolean includeSpaceBetweenLines) {
     int xCoord = x * myCharSize.width + getInsetX();
-    int yCoord = y * myCharSize.height;
+    int yCoord = y * myCharSize.height + (includeSpaceBetweenLines ? 0 : mySpaceBetweenLines / 2);
 
     if (xCoord < 0 || xCoord > getWidth() || yCoord < 0 || yCoord > getHeight()) {
       return;
     }
 
     int textLength = CharUtils.getTextLengthDoubleWidthAware(buf.getBuf(), buf.getStart(), buf.length(), mySettingsProvider.ambiguousCharsAreDoubleWidth());
-    int height = Math.min(myCharSize.height, getHeight() - yCoord);
+    int height = Math.min(myCharSize.height - (includeSpaceBetweenLines ? 0 : mySpaceBetweenLines), getHeight() - yCoord);
     int width = Math.min(textLength * TerminalPanel.this.myCharSize.width, TerminalPanel.this.getWidth() - xCoord);
 
     if (style instanceof HyperlinkStyle) {
@@ -1149,10 +1155,11 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
 
     gfx.setColor(getPalette().getColor(myStyleState.getForeground(style.getForegroundForRun())));
 
-    int baseLine = (y + 1) * myCharSize.height - myDescent;
 
     if (style.hasOption(TextStyle.Option.UNDERLINED)) {
-      gfx.drawLine(xCoord, baseLine + 3, (x + textLength) * myCharSize.width + getInsetX(), baseLine + 3);
+      int baseLine = (y + 1) * myCharSize.height - mySpaceBetweenLines / 2 - myDescent;
+      int lineY = baseLine + 3;
+      gfx.drawLine(xCoord, lineY, (x + textLength) * myCharSize.width + getInsetX(), lineY);
     }
   }
 
@@ -1199,11 +1206,11 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
       gfx.setFont(font);
 
       int descent = gfx.getFontMetrics(font).getDescent();
-      int baseLine = (y + 1) * myCharSize.height - descent;
+      int baseLine = (y + 1) * myCharSize.height - mySpaceBetweenLines / 2 - descent;
       int xCoord = (x + drawCharsOffset) * myCharSize.width + getInsetX();
       int textLength = CharUtils.getTextLengthDoubleWidthAware(buf.getBuf(), buf.getStart() + offset, blockLen, mySettingsProvider.ambiguousCharsAreDoubleWidth());
 
-      int yCoord = y * myCharSize.height;
+      int yCoord = y * myCharSize.height + mySpaceBetweenLines / 2;
 
       gfx.setClip(xCoord,
               yCoord,
@@ -1511,29 +1518,35 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
       // although it send the char '.'
       if (keycode == KeyEvent.VK_DELETE && keychar == '.') {
         myTerminalStarter.sendBytes(new byte[]{'.'});
+        e.consume();
         return;
       }
       // CTRL + Space is not handled in KeyEvent; handle it manually
       else if (keychar == ' ' && (e.getModifiers() & InputEvent.CTRL_MASK) != 0) {
         myTerminalStarter.sendBytes(new byte[]{Ascii.NUL});
+        e.consume();
         return;
       }
 
       final byte[] code = myTerminalStarter.getCode(keycode, e.getModifiers());
       if (code != null) {
         myTerminalStarter.sendBytes(code);
+        e.consume();
         if (mySettingsProvider.scrollToBottomOnTyping() && isCodeThatScrolls(keycode)) {
           scrollToBottom();
         }
-      } else if (Character.isISOControl(keychar)) { // keys filtered out here will be processed in processTerminalKeyTyped
-        processCharacter(keychar, e.getModifiers());
+      }
+      else if (Character.isISOControl(keychar)) { // keys filtered out here will be processed in processTerminalKeyTyped
+        processCharacter(e);
       }
     } catch (final Exception ex) {
       LOG.error("Error sending pressed key to emulator", ex);
     }
   }
 
-  private void processCharacter(char keychar, int modifiers) {
+  private void processCharacter(@NotNull KeyEvent e) {
+    char keychar = e.getKeyChar();
+    int modifiers = e.getModifiers();
     final char[] obuffer;
     if (mySettingsProvider.altSendsEscape() && (modifiers & InputEvent.ALT_MASK) != 0) {
       obuffer = new char[]{Ascii.ESC, keychar};
@@ -1547,6 +1560,7 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
     }
 
     myTerminalStarter.sendString(new String(obuffer));
+    e.consume();
 
     if (mySettingsProvider.scrollToBottomOnTyping()) {
       scrollToBottom();
@@ -1576,14 +1590,14 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
     final char keychar = e.getKeyChar();
     if (!Character.isISOControl(keychar)) { // keys filtered out here will be processed in processTerminalKeyPressed
       try {
-        processCharacter(keychar, e.getModifiers());
+        processCharacter(e);
       } catch (final Exception ex) {
         LOG.error("Error sending typed key to emulator", ex);
       }
     }
   }
 
-  public class TerminalKeyHandler implements KeyListener {
+  private class TerminalKeyHandler extends KeyAdapter {
 
     public TerminalKeyHandler() {
     }
@@ -1596,10 +1610,6 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
 
     public void keyTyped(final KeyEvent e) {
       processTerminalKeyTyped(e);
-    }
-
-    //Ignore releases
-    public void keyReleased(KeyEvent e) {
     }
   }
 
