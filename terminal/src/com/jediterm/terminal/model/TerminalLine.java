@@ -6,14 +6,12 @@ import com.jediterm.terminal.StyledTextConsumer;
 import com.jediterm.terminal.TextStyle;
 import com.jediterm.terminal.util.CharUtils;
 import com.jediterm.terminal.util.Pair;
+import org.apache.log4j.Logger;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 import org.jetbrains.annotations.TestOnly;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
+import java.util.*;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
@@ -22,8 +20,11 @@ import java.util.stream.Collectors;
  */
 public class TerminalLine {
 
+  private static final Logger LOG = Logger.getLogger(TerminalLine.class);
+
   private TextEntries myTextEntries = new TextEntries();
   private boolean myWrapped = false;
+  private final List<TerminalLineIntervalHighlighting> myCustomHighlightings = new ArrayList<>();
 
   public TerminalLine() {
   }
@@ -115,7 +116,7 @@ public class TerminalLine {
     return pair;
   }
 
-  private static TextEntries collectFromBuffer(@NotNull char[] buf, @NotNull TextStyle[] styles) {
+  private static TextEntries collectFromBuffer(char[] buf, @NotNull TextStyle[] styles) {
     TextEntries result = new TextEntries();
 
     TextStyle curStyle = styles[0];
@@ -228,7 +229,7 @@ public class TerminalLine {
 
   public synchronized void clearArea(int leftX, int rightX, @NotNull TextStyle style) {
     if (rightX == -1) {
-      rightX = myTextEntries.length();
+      rightX = Math.max(myTextEntries.length(), leftX);
     }
     writeCharacters(leftX, style, new CharBuffer(
             rightX >= myTextEntries.length() ? CharUtils.NUL_CHAR : CharUtils.EMPTY_CHAR,
@@ -252,18 +253,51 @@ public class TerminalLine {
   public synchronized void process(int y, StyledTextConsumer consumer, int startRow) {
     int x = 0;
     int nulIndex = -1;
-    for (TextEntry te : Lists.newArrayList(myTextEntries)) {
+    TerminalLineIntervalHighlighting highlighting = myCustomHighlightings.stream().findFirst().orElse(null);
+    for (TextEntry te : myTextEntries) {
       if (te.getText().isNul()) {
         if (nulIndex < 0) {
           nulIndex = x;
         }
         consumer.consumeNul(x, y, nulIndex, te.getStyle(), te.getText(), startRow);
       } else {
-        consumer.consume(x, y, te.getStyle(), te.getText(), startRow);
+        if (highlighting != null && te.getLength() > 0 && highlighting.intersectsWith(x, x + te.getLength())) {
+          processIntersection(x, y, te, consumer, startRow, highlighting);
+        }
+        else {
+          consumer.consume(x, y, te.getStyle(), te.getText(), startRow);
+        }
       }
       x += te.getLength();
     }
     consumer.consumeQueue(x, y, nulIndex < 0 ? x : nulIndex, startRow);
+  }
+
+  private void processIntersection(int startTextOffset, int y, @NotNull TextEntry te, @NotNull StyledTextConsumer consumer,
+                                   int startRow, @NotNull TerminalLineIntervalHighlighting highlighting) {
+    CharBuffer text = te.getText();
+    int endTextOffset = startTextOffset + text.length();
+    int[] offsets = new int[] {startTextOffset, endTextOffset, highlighting.getStartOffset(), highlighting.getEndOffset()};
+    Arrays.sort(offsets);
+    int startTextOffsetInd = Arrays.binarySearch(offsets, startTextOffset);
+    int endTextOffsetInd = Arrays.binarySearch(offsets, endTextOffset);
+    if (startTextOffsetInd < 0 || endTextOffsetInd < 0) {
+      LOG.error("Cannot find " + Arrays.toString(new int[] {startTextOffset, endTextOffset})
+        + " in " + Arrays.toString(offsets) + ": " + Arrays.toString(new int[] {startTextOffsetInd, endTextOffsetInd}));
+      consumer.consume(startTextOffset, y, te.getStyle(), text, startRow);
+      return;
+    }
+    for (int i = startTextOffsetInd; i < endTextOffsetInd; i++) {
+      int length = offsets[i + 1] - offsets[i];
+      if (length == 0) continue;
+      CharBuffer subText = new SubCharBuffer(text, offsets[i] - startTextOffset, length);
+      if (highlighting.intersectsWith(offsets[i], offsets[i + 1])) {
+        consumer.consume(offsets[i], y, highlighting.mergeWith(te.getStyle()), subText, startRow);
+      }
+      else {
+        consumer.consume(offsets[i], y, te.getStyle(), subText, startRow);
+      }
+    }
   }
 
   public synchronized boolean isNul() {
@@ -274,12 +308,6 @@ public class TerminalLine {
     }
 
     return true;
-  }
-
-  public void runWithLock(Runnable r) {
-    synchronized (this) {
-      r.run();
-    }
   }
 
   void forEachEntry(@NotNull Consumer<TextEntry> action) {
@@ -293,6 +321,19 @@ public class TerminalLine {
 
   void appendEntry(@NotNull TextEntry entry) {
     myTextEntries.add(entry);
+  }
+
+  public synchronized @NotNull TerminalLineIntervalHighlighting addCustomHighlighting(int startOffset, int length, @NotNull TextStyle textStyle) {
+    TerminalLineIntervalHighlighting highlighting = new TerminalLineIntervalHighlighting(this, startOffset, length, textStyle) {
+      @Override
+      protected void doDispose() {
+        synchronized (TerminalLine.this) {
+          myCustomHighlightings.remove(this);
+        }
+      }
+    };
+    myCustomHighlightings.add(highlighting);
+    return highlighting;
   }
 
   @Override
@@ -337,7 +378,7 @@ public class TerminalLine {
   }
 
   private static class TextEntries implements Iterable<TextEntry> {
-    private List<TextEntry> myTextEntries = new ArrayList<>();
+    private final List<TextEntry> myTextEntries = new ArrayList<>();
 
     private int myLength = 0;
 

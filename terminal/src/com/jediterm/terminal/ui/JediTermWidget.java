@@ -23,6 +23,7 @@ import javax.swing.plaf.basic.BasicScrollBarUI;
 import java.awt.*;
 import java.awt.event.*;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -64,7 +65,7 @@ public class JediTermWidget extends JPanel implements TerminalSession, TerminalW
     StyleState styleState = createDefaultStyle();
 
     myTextProcessing = new TextProcessing(settingsProvider.getHyperlinkColor(),
-                                          settingsProvider.getHyperlinkHighlightingMode());
+      settingsProvider.getHyperlinkHighlightingMode());
 
     TerminalTextBuffer terminalTextBuffer = new TerminalTextBuffer(columns, lines, styleState, settingsProvider.getBufferMaxLinesCount(), myTextProcessing);
     myTextProcessing.setTerminalTextBuffer(terminalTextBuffer);
@@ -95,7 +96,7 @@ public class JediTermWidget extends JPanel implements TerminalSession, TerminalW
     myScrollBar.setModel(myTerminalPanel.getBoundedRangeModel());
     mySessionRunning.set(false);
 
-    myTerminalPanel.init();
+    myTerminalPanel.init(myScrollBar);
 
     myTerminalPanel.setVisible(true);
   }
@@ -238,13 +239,13 @@ public class JediTermWidget extends JPanel implements TerminalSession, TerminalW
   @Override
   public List<TerminalAction> getActions() {
     return Lists.newArrayList(new TerminalAction(mySettingsProvider.getFindActionPresentation(),
-            new Predicate<KeyEvent>() {
-              @Override
-              public boolean apply(KeyEvent input) {
-                showFindText();
-                return true;
-              }
-            }).withMnemonicKey(KeyEvent.VK_F));
+      new Predicate<KeyEvent>() {
+        @Override
+        public boolean apply(KeyEvent input) {
+          showFindText();
+          return true;
+        }
+      }).withMnemonicKey(KeyEvent.VK_F));
   }
 
   private void showFindText() {
@@ -410,8 +411,8 @@ public class JediTermWidget extends JPanel implements TerminalSession, TerminalW
       });
 
       myTextField.setPreferredSize(new Dimension(
-              myTerminalPanel.myCharSize.width * 30,
-              myTerminalPanel.myCharSize.height + 3));
+        myTerminalPanel.myCharSize.width * 30,
+        myTerminalPanel.myCharSize.height + 3));
       myTextField.setEditable(true);
 
       updateLabel(null);
@@ -446,7 +447,7 @@ public class JediTermWidget extends JPanel implements TerminalSession, TerminalW
     private void updateLabel(FindItem selectedItem) {
       FindResult result = myTerminalPanel.getFindResult();
       label.setText(((selectedItem != null) ? selectedItem.getIndex() : 0)
-              + " of " + ((result != null) ? result.getItems().size() : 0));
+        + " of " + ((result != null) ? result.getItems().size() : 0));
     }
 
     @Override
@@ -501,7 +502,7 @@ public class JediTermWidget extends JPanel implements TerminalSession, TerminalW
         int anchorHeight = Math.max(2, trackBounds.height / modelHeight);
 
         Color color = mySettingsProvider.getTerminalColorPalette()
-                .getColor(mySettingsProvider.getFoundPatternColor().getBackground());
+          .getBackground(Objects.requireNonNull(mySettingsProvider.getFoundPatternColor().getBackground()));
         g.setColor(color);
         for (FindItem r : result.getItems()) {
           int where = trackBounds.height * r.getStart().y / modelHeight;

@@ -63,8 +63,8 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
 
   private TerminalPanelListener myTerminalPanelListener;
 
-  private SettingsProvider mySettingsProvider;
-  final private TerminalTextBuffer myTerminalTextBuffer;
+  private final SettingsProvider mySettingsProvider;
+  private final TerminalTextBuffer myTerminalTextBuffer;
 
   final private StyleState myStyleState;
 
@@ -150,12 +150,12 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
     myNormalFont = createFont();
     myBoldFont = myNormalFont.deriveFont(Font.BOLD);
     myItalicFont = myNormalFont.deriveFont(Font.ITALIC);
-    myBoldItalicFont = myBoldFont.deriveFont(Font.ITALIC);
+    myBoldItalicFont = myNormalFont.deriveFont(Font.BOLD | Font.ITALIC);
 
     establishFontMetrics();
   }
 
-  public void init() {
+  public void init(@NotNull JScrollBar scrollBar) {
     initFont();
 
     setPreferredSize(new Dimension(getPixelWidth(), getPixelHeight()));
@@ -204,11 +204,7 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
 
     addMouseWheelListener(e -> {
       if (isLocalMouseAction(e)) {
-        int notches = e.getWheelRotation();
-        if (Math.abs(e.getPreciseWheelRotation()) < 0.01) {
-          notches = 0;
-        }
-        moveScrollBar(notches * 3);
+        handleMouseWheelEvent(e, scrollBar);
       }
     });
 
@@ -312,6 +308,14 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
                                                   });
 
     createRepaintTimer();
+  }
+
+  protected void handleMouseWheelEvent(@NotNull MouseWheelEvent e, @NotNull JScrollBar scrollBar) {
+    if (e.isShiftDown() || e.getUnitsToScroll() == 0 || Math.abs(e.getPreciseWheelRotation()) < 0.01) {
+      return;
+    }
+    moveScrollBar(e.getUnitsToScroll());
+    e.consume();
   }
 
   private void handleHyperlinks(Point p, boolean isControlDown) {
@@ -564,7 +568,10 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
     if (myTerminalStarter != null) {
       Dimension newSize = getTerminalSizeFromComponent();
       if (newSize != null) {
-        myTerminalStarter.postResize(newSize, RequestOrigin.User);
+        JediTerminal.ensureTermMinimumSize(newSize);
+        if (!myTermSize.equals(newSize)) {
+          myTerminalStarter.postResize(newSize, RequestOrigin.User);
+        }
       }
     }
   }
@@ -582,34 +589,22 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
     myCustomKeyListeners.remove(keyListener);
   }
 
-  @Deprecated
-  public Dimension requestResize(final Dimension newSize,
-                                 final RequestOrigin origin,
-                                 int cursorY,
-                                 JediTerminal.ResizeHandler resizeHandler) {
-    return requestResize(newSize, origin, 0, cursorY, resizeHandler);
-  }
-
-  public Dimension requestResize(final Dimension newSize,
-                                 final RequestOrigin origin,
-                                 int cursorX,
-                                 int cursorY,
-                                 JediTerminal.ResizeHandler resizeHandler) {
+  public void requestResize(@NotNull Dimension newSize,
+                            final RequestOrigin origin,
+                            int cursorX,
+                            int cursorY,
+                            JediTerminal.ResizeHandler resizeHandler) {
     if (!newSize.equals(myTermSize)) {
       myTerminalTextBuffer.resize(newSize, origin, cursorX, cursorY, resizeHandler, mySelection);
+      myTermSize = (Dimension)newSize.clone();
 
-      myTermSize = (Dimension) newSize.clone();
-
-      final Dimension pixelDimension = new Dimension(getPixelWidth(), getPixelHeight());
-
+      Dimension pixelDimension = new Dimension(getPixelWidth(), getPixelHeight());
       setPreferredSize(pixelDimension);
       if (myTerminalPanelListener != null) {
-        myTerminalPanelListener.onPanelResize(pixelDimension, origin);
+        myTerminalPanelListener.onPanelResize(origin);
       }
       SwingUtilities.invokeLater(() -> updateScrolling(true));
     }
-
-    return new Dimension(getPixelWidth(), getPixelHeight());
   }
 
   public void setTerminalPanelListener(final TerminalPanelListener terminalPanelListener) {
@@ -625,8 +620,6 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
     final FontMetrics fo = graphics.getFontMetrics();
 
     myCharSize.width = fo.charWidth('W');
-    // The magic +2 here is to give lines a tiny bit of extra height to avoid clipping when rendering some Apple
-    // emoji, which are slightly higher than the font metrics reported character height :(
     int fontMetricsHeight = fo.getHeight();
     myCharSize.height = (int)Math.ceil(fontMetricsHeight * lineSpacing);
     mySpaceBetweenLines = Math.max(0, ((myCharSize.height - fontMetricsHeight) / 2) * 2);
@@ -688,12 +681,12 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
 
   @Override
   public Color getBackground() {
-    return getPalette().getColor(myStyleState.getBackground());
+    return getPalette().getBackground(myStyleState.getBackground());
   }
 
   @Override
   public Color getForeground() {
-    return getPalette().getColor(myStyleState.getForeground());
+    return getPalette().getForeground(myStyleState.getForeground());
   }
 
   @Override
@@ -1053,9 +1046,9 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
       int width = Math.min(textLength * TerminalPanel.this.myCharSize.width, TerminalPanel.this.getWidth() - xCoord);
       int lineStrokeSize = 2;
 
-      Color fgColor = getPalette().getColor(myStyleState.getForeground(style.getForegroundForRun()));
+      Color fgColor = getPalette().getForeground(myStyleState.getForeground(style.getForegroundForRun()));
       TextStyle inversedStyle = getInversedStyle(style);
-      Color inverseBg = getPalette().getColor(myStyleState.getBackground(inversedStyle.getBackgroundForRun()));
+      Color inverseBg = getPalette().getBackground(myStyleState.getBackground(inversedStyle.getBackgroundForRun()));
 
       switch (myShape) {
         case BLINK_BLOCK:
@@ -1140,7 +1133,7 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
       }
     }
 
-    Color backgroundColor = getPalette().getColor(myStyleState.getBackground(style.getBackgroundForRun()));
+    Color backgroundColor = getPalette().getBackground(myStyleState.getBackground(style.getBackgroundForRun()));
     gfx.setColor(backgroundColor);
     gfx.fillRect(xCoord,
             yCoord,
@@ -1153,7 +1146,7 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
 
     drawChars(x, y, buf, style, gfx);
 
-    gfx.setColor(getPalette().getColor(myStyleState.getForeground(style.getForegroundForRun())));
+    gfx.setColor(getStyleForeground(style));
 
 
     if (style.hasOption(TextStyle.Option.UNDERLINED)) {
@@ -1217,7 +1210,7 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
               getWidth() - xCoord,
               getHeight() - yCoord);
 
-      gfx.setColor(getPalette().getColor(myStyleState.getForeground(style.getForegroundForRun())));
+      gfx.setColor(getStyleForeground(style));
 
       gfx.drawChars(renderingBuffer.getBuf(), buf.getStart() + offset, blockLen, xCoord, baseLine);
 
@@ -1226,6 +1219,18 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
       blockLen = 1;
     }
     gfx.setClip(null);
+  }
+
+  private @NotNull Color getStyleForeground(@NotNull TextStyle style) {
+    Color foreground = getPalette().getForeground(myStyleState.getForeground(style.getForegroundForRun()));
+    if (style.hasOption(Option.DIM)) {
+      Color background = getPalette().getBackground(myStyleState.getBackground(style.getBackgroundForRun()));
+      foreground = new Color((foreground.getRed() + background.getRed()) / 2,
+                             (foreground.getGreen() + background.getGreen()) / 2,
+                             (foreground.getBlue() + background.getBlue()) / 2,
+                             foreground.getAlpha());
+    }
+    return foreground;
   }
 
   protected Font getFontToDisplay(char c, TextStyle style) {
@@ -1305,6 +1310,16 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
     if (mySettingsProvider.audibleBell()) {
       Toolkit.getDefaultToolkit().beep();
     }
+  }
+
+  public @Nullable Rectangle getBounds(@NotNull TerminalLineIntervalHighlighting highlighting) {
+    TerminalLine line = highlighting.getLine();
+    int index = myTerminalTextBuffer.findScreenLineIndex(line);
+    if (index >= 0 && !highlighting.isDisposed()) {
+      Point topLeft = new Point(highlighting.getStartOffset() * myCharSize.width + getInsetX(), index * myCharSize.height);
+      return new Rectangle(topLeft, new Dimension(myCharSize.width * highlighting.getLength(), myCharSize.height));
+    }
+    return null;
   }
 
   public BoundedRangeModel getBoundedRangeModel() {
@@ -1389,6 +1404,10 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
               handlePaste();
               return true;
             }).withMnemonicKey(KeyEvent.VK_P).withEnabledSupplier(() -> getClipboardString() != null),
+            new TerminalAction(mySettingsProvider.getSelectAllActionPresentation(), input -> {
+              selectAll();
+              return true;
+            }),
             new TerminalAction(mySettingsProvider.getClearBufferActionPresentation(), input -> {
               clearBuffer();
               return true;
@@ -1409,6 +1428,11 @@ public class TerminalPanel extends JComponent implements TerminalDisplay, Termin
               scrollDown();
               return true;
             }));
+  }
+
+  public void selectAll() {
+    mySelection = new TerminalSelection(new Point(0, -myTerminalTextBuffer.getHistoryLinesCount()),
+      new Point(myTermSize.width, myTerminalTextBuffer.getScreenLinesCount()));
   }
 
   @NotNull

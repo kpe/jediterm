@@ -21,6 +21,7 @@ import java.io.UnsupportedEncodingException;
 import java.net.URI;
 import java.nio.charset.Charset;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * Terminal that reflects obtained commands and text at {@link TerminalDisplay}(handles change of cursor position, screen size etc)
@@ -32,14 +33,15 @@ public class JediTerminal implements Terminal, TerminalMouseListener, TerminalCo
   private static final Logger LOG = Logger.getLogger(JediTerminal.class.getName());
 
   private static final int MIN_WIDTH = 5;
+  private static final int MIN_HEIGHT = 2;
 
   private int myScrollRegionTop;
   private int myScrollRegionBottom;
   volatile private int myCursorX = 0;
   volatile private int myCursorY = 1;
 
-  private int myTerminalWidth = 80;
-  private int myTerminalHeight = 24;
+  private int myTerminalWidth;
+  private int myTerminalHeight;
 
   private final TerminalDisplay myDisplay;
   private final TerminalTextBuffer myTerminalTextBuffer;
@@ -63,6 +65,7 @@ public class JediTerminal implements Terminal, TerminalMouseListener, TerminalCo
 
   private MouseMode myMouseMode = MouseMode.MOUSE_REPORTING_NONE;
   private Point myLastMotionReport = null;
+  private boolean myCursorYChanged;
 
   public JediTerminal(final TerminalDisplay display, final TerminalTextBuffer buf, final StyleState initialStyleState) {
     myDisplay = display;
@@ -124,6 +127,12 @@ public class JediTerminal implements Terminal, TerminalMouseListener, TerminalCo
   private void writeDecodedCharacters(char[] string) {
     myTerminalTextBuffer.lock();
     try {
+      if (myCursorYChanged && string.length > 0) {
+        myCursorYChanged = false;
+        if (myCursorY > 1) {
+          myTerminalTextBuffer.getLine(myCursorY - 2).setWrapped(false);
+        }
+      }
       wrapLines();
       scrollY();
 
@@ -191,6 +200,7 @@ public class JediTerminal implements Terminal, TerminalMouseListener, TerminalCo
 
   @Override
   public void newLine() {
+    myCursorYChanged = true;
     myCursorY += 1;
 
     scrollY();
@@ -487,6 +497,7 @@ public class JediTerminal implements Terminal, TerminalMouseListener, TerminalCo
   public void cursorUp(final int countY) {
     myTerminalTextBuffer.lock();
     try {
+      myCursorYChanged = true;
       myCursorY -= countY;
       myCursorY = Math.max(myCursorY, scrollingRegionTop());
       adjustXY(-1);
@@ -500,6 +511,7 @@ public class JediTerminal implements Terminal, TerminalMouseListener, TerminalCo
   public void cursorDown(final int dY) {
     myTerminalTextBuffer.lock();
     try {
+      myCursorYChanged = true;
       myCursorY += dY;
       myCursorY = Math.min(myCursorY, scrollingRegionBottom());
       adjustXY(-1);
@@ -1043,38 +1055,48 @@ public class JediTerminal implements Terminal, TerminalMouseListener, TerminalCo
   }
 
   public interface ResizeHandler {
-    @Deprecated
-    void sizeUpdated(int termWidth, int termHeight, int cursorY);
+    void sizeUpdated(int termWidth, int termHeight, int cursorX, int cursorY);
+  }
 
-    default void sizeUpdated(int termWidth, int termHeight, int cursorX, int cursorY) {
-      sizeUpdated(termWidth, termHeight, cursorY);
+  @Override
+  public void resize(@NotNull Dimension newTermSize, @NotNull RequestOrigin origin) {
+    resize(newTermSize, origin, CompletableFuture.completedFuture(null));
+  }
+
+  @Override
+  public void resize(@NotNull Dimension newTermSize, @NotNull RequestOrigin origin, @NotNull CompletableFuture<?> promptUpdated) {
+    int oldHeight = myTerminalHeight;
+    ensureTermMinimumSize(newTermSize);
+    if (newTermSize.width == myTerminalWidth && newTermSize.height == myTerminalHeight) {
+      return;
+    }
+    if (newTermSize.width == myTerminalWidth) {
+      doResize(newTermSize, origin, oldHeight);
+    }
+    else {
+      myTerminalWidth = newTermSize.width;
+      myTerminalHeight = newTermSize.height;
+      promptUpdated.thenRun(() -> {
+        doResize(newTermSize, origin, oldHeight);
+      });
     }
   }
 
-  public Dimension resize(final Dimension pendingResize, final RequestOrigin origin) {
-    final int oldHeight = myTerminalHeight;
-    if (pendingResize.width <= MIN_WIDTH) {
-      pendingResize.setSize(MIN_WIDTH, pendingResize.height);
-    }
-    final Dimension pixelSize = myDisplay.requestResize(pendingResize, origin, myCursorX, myCursorY, new ResizeHandler() {
-      @Override
-      public void sizeUpdated(int termWidth, int termHeight, int cursorY) {
-      }
+  private void doResize(@NotNull Dimension newTermSize, @NotNull RequestOrigin origin, int oldHeight) {
+    myDisplay.requestResize(newTermSize, origin, myCursorX, myCursorY, (termWidth, termHeight, cursorX, cursorY) -> {
+      myTerminalWidth = termWidth;
+      myTerminalHeight = termHeight;
+      myCursorY = cursorY;
+      myCursorX = Math.min(cursorX, myTerminalWidth - 1);
+      myDisplay.setCursor(myCursorX, myCursorY);
 
-      @Override
-      public void sizeUpdated(int termWidth, int termHeight, int cursorX, int cursorY) {
-        myTerminalWidth = termWidth;
-        myTerminalHeight = termHeight;
-        myCursorY = cursorY;
-        myCursorX = Math.min(cursorX, myTerminalWidth - 1);
-        myDisplay.setCursor(myCursorX, myCursorY);
-
-        myTabulator.resize(myTerminalWidth);
-      }
+      myTabulator.resize(myTerminalWidth);
     });
-
     myScrollRegionBottom += myTerminalHeight - oldHeight;
-    return pixelSize;
+  }
+
+  public static void ensureTermMinimumSize(@NotNull Dimension termSize) {
+    termSize.setSize(Math.max(MIN_WIDTH, termSize.width), Math.max(MIN_HEIGHT, termSize.height));
   }
 
   @Override
@@ -1154,7 +1176,14 @@ public class JediTerminal implements Terminal, TerminalMouseListener, TerminalCo
     myTerminalTextBuffer.processHistoryAndScreenLines(-myTerminalTextBuffer.getHistoryLinesCount(), -1, new StyledTextConsumer() {
       @Override
       public void consume(int x, int y, @NotNull TextStyle style, @NotNull CharBuffer characters, int startRow) {
-        for (int i = 0; i < characters.length(); i++) {
+        int offset = 0;
+        int length = characters.length();
+        if (characters instanceof SubCharBuffer) {
+          SubCharBuffer subCharBuffer = (SubCharBuffer) characters;
+          characters = subCharBuffer.getParent();
+          offset = subCharBuffer.getOffset();
+        }
+        for (int i = offset; i < offset + length; i++) {
           finder.nextChar(x, y - startRow, characters, i);
         }
       }

@@ -1,6 +1,7 @@
 package com.jediterm.terminal;
 
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import java.awt.*;
 import java.io.IOException;
@@ -16,12 +17,11 @@ public abstract class ProcessTtyConnector implements TtyConnector {
   protected final InputStream myInputStream;
   protected final OutputStream myOutputStream;
   protected final InputStreamReader myReader;
-  protected Charset myCharset;
+  protected final Charset myCharset;
   private Dimension myPendingTermSize;
-  private Dimension myPendingPixelSize;
-  private Process myProcess;
+  private final Process myProcess;
 
-  public ProcessTtyConnector(@NotNull Process process, Charset charset) {
+  public ProcessTtyConnector(@NotNull Process process, @NotNull Charset charset) {
     myOutputStream = process.getOutputStream();
     myCharset = charset;
     myInputStream = process.getInputStream();
@@ -35,24 +35,25 @@ public abstract class ProcessTtyConnector implements TtyConnector {
   }
 
   @Override
-  public void resize(Dimension termSize, Dimension pixelSize) {
-    setPendingTermSize(termSize);
-    setPendingPixelSize(pixelSize);
+  public void resize(@NotNull Dimension termWinSize) {
+    setPendingTermSize(termWinSize);
     if (isConnected()) {
       resizeImmediately();
       setPendingTermSize(null);
-      setPendingPixelSize(null);
     }
   }
 
-  protected abstract void resizeImmediately();
+  /**
+   * @deprecated override {@link #resize(Dimension)} instead
+   */
+  @Deprecated
+  protected void resizeImmediately() {}
 
   @Override
   public abstract String getName();
 
   public int read(char[] buf, int offset, int length) throws IOException {
     return myReader.read(buf, offset, length);
-    //return myInputStream.read(buf, offset, length);
   }
 
   public void write(byte[] bytes) throws IOException {
@@ -68,20 +69,28 @@ public abstract class ProcessTtyConnector implements TtyConnector {
     write(string.getBytes(myCharset));
   }
 
-  protected void setPendingTermSize(Dimension pendingTermSize) {
-    this.myPendingTermSize = pendingTermSize;
+  /**
+   * @deprecated override {@link #resize(Dimension)} instead
+   */
+  @Deprecated
+  protected void setPendingTermSize(@Nullable Dimension pendingTermSize) {
+    myPendingTermSize = pendingTermSize;
   }
 
-  protected void setPendingPixelSize(Dimension pendingPixelSize) {
-    this.myPendingPixelSize = pendingPixelSize;
-  }
-
-  protected Dimension getPendingTermSize() {
+  /**
+   * @deprecated override {@link #resize(Dimension)} instead
+   */
+  @Deprecated
+  protected @Nullable Dimension getPendingTermSize() {
     return myPendingTermSize;
   }
 
+  /**
+   * @deprecated don't use it (pixel size is not used anymore)
+   */
+  @Deprecated
   protected Dimension getPendingPixelSize() {
-    return myPendingPixelSize;
+    return new Dimension(0, 0);
   }
 
   @Override
